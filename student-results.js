@@ -12,13 +12,26 @@
     catch { return []; }
   }
 
-  function getAccessToken() {
-    try {
-      const sessionFromApp = window.RB_GET_SESSION?.();
-      if (sessionFromApp?.then) return sessionFromApp.then(result => result?.data?.session?.access_token || readStoredToken());
-      if (sessionFromApp?.data?.session?.access_token) return sessionFromApp.data.session.access_token;
-    } catch { /* Fall back to the persisted Supabase session. */ }
-    return readStoredToken();
+  let studentAuthClient = null;
+
+  async function getAccessToken() {
+    if (!window.supabase || !window.RB_SUPABASE_URL || !window.RB_SUPABASE_KEY) {
+      throw new Error('Koneksi siswa ke Supabase belum tersedia.');
+    }
+    if (!studentAuthClient) {
+      studentAuthClient = window.supabase.createClient(window.RB_SUPABASE_URL, window.RB_SUPABASE_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+      });
+    }
+    const { data: { session }, error: sessionError } = await studentAuthClient.auth.getSession();
+    if (sessionError) throw sessionError;
+    if (session?.user?.is_anonymous && session.access_token) return session.access_token;
+    const { data, error } = await studentAuthClient.auth.signInAnonymously();
+    if (error) throw error;
+    if (!data?.user?.is_anonymous || !data?.session?.access_token) {
+      throw new Error('Sesi siswa anonim gagal dibuat. Pastikan Anonymous Sign-ins aktif di Supabase.');
+    }
+    return data.session.access_token;
   }
 
   function readStoredToken() {
