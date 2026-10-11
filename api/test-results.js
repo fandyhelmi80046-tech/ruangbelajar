@@ -54,7 +54,7 @@ module.exports = async function handler(req, res) {
     const grade = String(req.query.grade || 'Semua').trim();
     const topic = String(req.query.topic || 'Semua').trim();
     if (subject !== 'Semua' && !SUBJECTS.includes(subject)) return send(res, 400, { error: 'Filter mata pelajaran tidak valid.' });
-    if (!['Semua', 'Kelas 7', 'Kelas 8', 'Kelas 9'].includes(grade)) return send(res, 400, { error: 'Filter kelas tidak valid.' });
+    if (grade !== 'Semua' && !/^(?:[7-9][A-E]|Kelas [789])$/.test(grade)) return send(res, 400, { error: 'Filter kelas tidak valid.' });
     if (topic.length > 200) return send(res, 400, { error: 'Filter topik terlalu panjang.' });
     const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
     const keyValue = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '';
