@@ -52,8 +52,10 @@ module.exports = async function handler(req, res) {
     if (!userToken || !(await isTeacher(userToken))) return send(res, 401, { error: 'Silakan masuk sebagai guru untuk melihat laporan.' });
     const subject = String(req.query.subject || 'Semua').trim();
     const grade = String(req.query.grade || 'Semua').trim();
+    const topic = String(req.query.topic || 'Semua').trim();
     if (subject !== 'Semua' && !SUBJECTS.includes(subject)) return send(res, 400, { error: 'Filter mata pelajaran tidak valid.' });
     if (!['Semua', 'Kelas 7', 'Kelas 8', 'Kelas 9'].includes(grade)) return send(res, 400, { error: 'Filter kelas tidak valid.' });
+    if (topic.length > 200) return send(res, 400, { error: 'Filter topik terlalu panjang.' });
     const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
     const keyValue = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '';
     const spreadsheetId = process.env.GOOGLE_SHEET_ID;
@@ -72,7 +74,7 @@ module.exports = async function handler(req, res) {
       if (!response.ok) { if (response.status === 404) continue; throw new Error('Google Sheets data lookup failed: ' + response.status); }
       const data = await response.json();
       for (const r of data.values || []) {
-        if (r.length < 2 || (grade !== 'Semua' && String(r[2] || '').trim() !== grade)) continue;
+        if (r.length < 2 || (grade !== 'Semua' && String(r[2] || '').trim() !== grade) || (topic !== 'Semua' && String(r[4] || '').trim() !== topic)) continue;
         rows.push({ waktu: r[0] || '', nama: r[1] || '', kelas: r[2] || '', mataPelajaran: r[3] || title, topik: r[4] || '', tujuan: r[5] || '', nilai: r[6] || '', kkm: r[7] || '', status: r[8] || '', jumlahSoal: r[9] || '' });
       }
     }
