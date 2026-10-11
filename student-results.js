@@ -52,7 +52,7 @@
       <div class="gradebox">Sebelum ujian dimulai, isi nama lengkap dan kelas. Data ini dicatat bersama hasil ujian.</div>
       <form id="studentIdentityForm" class="formgrid" style="margin-top:14px">
         <div class="field wide"><label for="studentFullName">Nama lengkap</label><input id="studentFullName" name="fullName" autocomplete="name" maxlength="100" required placeholder="Contoh: Siti Aminah"></div>
-        <div class="field wide"><label for="studentGrade">Kelas</label><select id="studentGrade" name="grade" required><option value="">Pilih kelas</option><option>Kelas 7</option><option>Kelas 8</option><option>Kelas 9</option></select></div>
+        <div class="field wide"><label for="studentGrade">Kelas</label><select id="studentGrade" name="grade" required><option value="">Pilih kelas</option><option>7A</option><option>7B</option><option>7C</option><option>7D</option><option>7E</option><option>8A</option><option>8B</option><option>8C</option><option>8D</option><option>8E</option><option>9A</option><option>9B</option><option>9C</option><option>9D</option><option>9E</option></select></div>
         <div class="field wide"><div class="manage-note">${esc(lesson.subject)} · ${esc(lesson.topic)}</div></div>
         <div class="field wide"><button class="primary" type="submit">Lanjut ke ujian →</button></div>
       </form>`;
