@@ -18,6 +18,10 @@ create table if not exists public.teachers (
   created_at timestamptz not null default now()
 );
 
+-- Batasi akun guru menjadi satu baris saja (berlaku juga jika tabel sudah ada).
+create unique index if not exists teachers_single_account_only
+  on public.teachers ((true));
+
 create table if not exists public.student_progress (
   user_id uuid not null references auth.users(id) on delete cascade,
   lesson_id text not null references public.lessons(id) on delete cascade,

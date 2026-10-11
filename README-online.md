@@ -5,14 +5,14 @@
 1. Buat proyek Supabase.
 2. Buka **SQL Editor**, jalankan seluruh isi `supabase-schema.sql`.
 3. Di **Authentication > Providers**, aktifkan **Anonymous sign-ins** untuk sesi siswa tanpa formulir login.
-4. Di **Authentication > Users**, buat akun email/kata sandi guru.
-5. Salin UUID akun guru, lalu jalankan SQL berikut di SQL Editor:
+4. Di **Authentication > Users**, buat **satu akun email/kata sandi bersama** untuk semua guru.
+5. Salin UUID akun tersebut, lalu jalankan SQL berikut di SQL Editor:
 
    ```sql
    insert into public.teachers (user_id) values ('UUID_USER_GURU');
    ```
 
-   Ulangi untuk setiap akun guru. Kebijakan database membatasi penulisan materi hanya untuk akun yang terdaftar di tabel `teachers`.
+   Jangan tambahkan akun guru kedua. Indeks `teachers_single_account_only` membatasi tabel itu menjadi satu akun. Kebijakan database membatasi penulisan materi hanya untuk akun bersama yang terdaftar di tabel `teachers`.
 
 ## 2. Hubungkan aplikasi ke Supabase
 
