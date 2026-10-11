@@ -6,6 +6,19 @@ const DEFAULT_ORIGIN = 'https://ruangbelajar-ten.vercel.app';
 const HEADERS = ['Waktu', 'Nama Lengkap', 'Kelas', 'Mata Pelajaran', 'Topik', 'Tujuan Pembelajaran', 'Nilai', 'KKM', 'Status', 'Jumlah Soal'];
 
 function send(res, status, body) { res.status(status).json(body); }
+
+function parseGooglePrivateKey(value) {
+  let raw = String(value || '').trim();
+  if (raw.startsWith('"') && raw.endsWith('"')) {
+    try { raw = JSON.parse(raw); } catch { /* Continue with the original value. */ }
+  }
+  if (raw.startsWith('{')) {
+    try { raw = JSON.parse(raw).private_key || raw; } catch { /* Not a service-account JSON document. */ }
+  }
+  raw = raw.replace(/\\n/g, '\n').replace(/\r\n/g, '\n').trim();
+  try { return crypto.createPrivateKey(raw); }
+  catch { throw new Error('Google private key is not a valid PEM. Set GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY to the service account private_key value.'); }
+}
 function base64url(value) { return Buffer.from(value).toString('base64url'); }
 
 function serviceAssertion(email, privateKey) {
@@ -116,10 +129,11 @@ module.exports = async function handler(req, res) {
     if (Number.isNaN(submittedAt.getTime())) return send(res, 400, { error: 'Waktu ujian tidak valid.' });
 
     const serviceEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    const privateKey = (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '').replace(/\n/g, '\n');
+    const privateKeyValue = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '';
     const spreadsheetId = process.env.GOOGLE_SHEET_ID;
-    if (!serviceEmail || !privateKey || !spreadsheetId) return send(res, 503, { error: 'Integrasi Google Sheets belum selesai disiapkan.' });
+    if (!serviceEmail || !privateKeyValue || !spreadsheetId) return send(res, 503, { error: 'Integrasi Google Sheets belum selesai disiapkan.' });
 
+    const privateKey = parseGooglePrivateKey(privateKeyValue);
     const token = await getGoogleAccessToken(serviceEmail, privateKey);
     const sheetName = sheetTitleForSubject(subject);
     await ensureSubjectSheet(token, spreadsheetId, sheetName);
