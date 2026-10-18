@@ -16,7 +16,7 @@ function parseGooglePrivateKey(value) {
 function base64url(value) { return Buffer.from(value).toString('base64url'); }
 function serviceAssertion(email, privateKey) {
   const now = Math.floor(Date.now() / 1000);
-  const unsigned = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' })) + '.' + base64url(JSON.stringify({ iss: email, scope: 'https://www.googleapis.com/auth/spreadsheets.readonly', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }));
+  const unsigned = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' })) + '.' + base64url(JSON.stringify({ iss: email, scope: 'https://www.googleapis.com/auth/spreadsheets', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }));
   return unsigned + '.' + crypto.sign('RSA-SHA256', Buffer.from(unsigned), privateKey).toString('base64url');
 }
 async function getGoogleAccessToken(email, privateKey) {
@@ -42,15 +42,15 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, DELETE, OPTIONS');
   res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'GET') return send(res, 405, { error: 'Metode tidak didukung.' });
+  if (req.method !== 'GET' && req.method !== 'DELETE') return send(res, 405, { error: 'Metode tidak didukung.' });
   try {
     const auth = req.headers.authorization || '';
     const userToken = auth.startsWith('Bearer ') ? auth.slice(7) : '';
     if (!userToken || !(await isTeacher(userToken))) return send(res, 401, { error: 'Silakan masuk sebagai guru untuk melihat laporan.' });
-    const subject = String(req.query.subject || 'Semua').trim();
+    if (req.method === 'DELETE') {      const body = req.body || {};      const deleteSubject = String(body.subject || '').trim();      const deleteTopic = String(body.topic || '').trim();      const deleteObjective = String(body.objective || '').trim();      if (!SUBJECTS.includes(deleteSubject)) return send(res, 400, { error: 'Mata pelajaran tidak valid.' });      if (!deleteTopic || deleteTopic.length > 200 || !deleteObjective || deleteObjective.length > 1000) return send(res, 400, { error: 'Topik dan tujuan pembelajaran wajib diisi.' });      const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;      const keyValue = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '';      const spreadsheetId = process.env.GOOGLE_SHEET_ID;      if (!email || !keyValue || !spreadsheetId) return send(res, 503, { error: 'Integrasi Google Sheets belum dikonfigurasi.' });      const googleToken = await getGoogleAccessToken(email, parseGooglePrivateKey(keyValue));      const base = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId);      const metaResponse = await fetch(base + '?fields=sheets.properties(sheetId,title)', { headers: { Authorization: 'Bearer ' + googleToken } });      if (!metaResponse.ok) throw new Error('Google Sheets metadata lookup failed: ' + metaResponse.status);      const meta = await metaResponse.json();      const sheet = (meta.sheets || []).map(item => item.properties).find(item => item && item.title === sheetTitleForSubject(deleteSubject));      if (!sheet) return send(res, 200, { ok: true, deleted: 0 });      const range = "'" + sheet.title.replace(/'/g, "''") + "'!A2:J";      const valuesResponse = await fetch(base + '/values/' + encodeURIComponent(range), { headers: { Authorization: 'Bearer ' + googleToken } });      if (!valuesResponse.ok) throw new Error('Google Sheets data lookup failed: ' + valuesResponse.status);      const values = await valuesResponse.json();      const matchingIndices = (values.values || []).map((row, index) => String(row[4] || '').trim() === deleteTopic && String(row[5] || '').trim() === deleteObjective ? index : -1).filter(index => index >= 0);      if (!matchingIndices.length) return send(res, 200, { ok: true, deleted: 0 });      const requests = matchingIndices.reverse().map(index => ({ deleteDimension: { range: { sheetId: sheet.sheetId, dimension: 'ROWS', startIndex: index + 1, endIndex: index + 2 } } }));      const deleteResponse = await fetch(base + ':batchUpdate', { method: 'POST', headers: { Authorization: 'Bearer ' + googleToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ requests }) });      if (!deleteResponse.ok) throw new Error('Google Sheets deletion failed: ' + deleteResponse.status);      return send(res, 200, { ok: true, deleted: matchingIndices.length });    }    const subject = String(req.query.subject || 'Semua').trim();
     const grade = String(req.query.grade || 'Semua').trim();
     const topic = String(req.query.topic || 'Semua').trim();
     if (subject !== 'Semua' && !SUBJECTS.includes(subject)) return send(res, 400, { error: 'Filter mata pelajaran tidak valid.' });
