@@ -12,6 +12,24 @@
     catch { return []; }
   }
 
+  function collectQuestionAnalysis(lessonId, form) {
+    const lesson = topics().find(item => item.id === lessonId);
+    return (lesson?.questions || []).map((question, index) => {
+      const field = form.querySelector(`[name="a${index}"]`);
+      let correct = false;
+      if (question.type === 'essay') {
+        const response = (field?.value || '').toLowerCase();
+        const keys = String(question.answer || '').split(',').map(key => key.trim().toLowerCase()).filter(Boolean);
+        correct = keys.length > 0 && keys.every(key => response.includes(key));
+      } else {
+        const selected = [...form.querySelectorAll(`[name="a${index}"]:checked`)].map(input => input.value).sort().join(',');
+        const expected = String(question.answer || '').split(',').map(value => value.trim()).sort().join(',');
+        correct = selected === expected;
+      }
+      return { number: index + 1, question: String(question.prompt || '').slice(0, 250), correct };
+    });
+  }
+
   let studentAuthClient = null;
 
   async function getAccessToken() {
@@ -84,7 +102,8 @@
     const scoreMatch = resultText.match(/Nilaimu:\s*(\d+)%/);
     if (!scoreMatch) return;
 
-    const attempt = { ...currentAttempt, score: Number(scoreMatch[1]), passed: resultText.includes('KKM tercapai'), submittedAt: new Date().toISOString() };
+    const analysis = collectQuestionAnalysis(currentAttempt.lessonId, form);
+    const attempt = { ...currentAttempt, analysis, score: Number(scoreMatch[1]), passed: resultText.includes('KKM tercapai'), submittedAt: new Date().toISOString() };
     const status = document.createElement('div');
     status.className = 'manage-note';
     status.setAttribute('role', 'status');
