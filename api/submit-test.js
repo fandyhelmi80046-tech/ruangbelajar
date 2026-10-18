@@ -126,7 +126,7 @@ module.exports = async function handler(req, res) {
     const passed = body.passed === true;
     const submittedAt = new Date(body.submittedAt || Date.now());
     if (fullName.length < 3 || fullName.length > 100 || /[\u0000-\u001f]/.test(fullName)) return send(res, 400, { error: 'Nama lengkap tidak valid.' });
-    if (!['Kelas 7', 'Kelas 8', 'Kelas 9'].includes(grade)) return send(res, 400, { error: 'Kelas tidak valid.' });
+    if (!/^(?:[7-9][A-E]|Kelas [789])$/.test(grade)) return send(res, 400, { error: 'Kelas tidak valid.' });
     if (!subject || subject.length > 100 || !topic || topic.length > 200 || objective.length > 1000) return send(res, 400, { error: 'Informasi ujian tidak valid.' });
     if (!Number.isInteger(score) || score < 0 || score > 100 || !Number.isInteger(kkm) || kkm < 0 || kkm > 100 || !Number.isInteger(totalQuestions) || totalQuestions < 1 || totalQuestions > 100) return send(res, 400, { error: 'Nilai ujian tidak valid.' });
     if (Number.isNaN(submittedAt.getTime())) return send(res, 400, { error: 'Waktu ujian tidak valid.' });
