@@ -26,6 +26,10 @@ async function getGoogleAccessToken(email, privateKey) {
   return body.access_token;
 }
 function sheetTitleForSubject(subject) { return subject.slice(0, 100); }
+function parseAnalysis(value) {
+  try { const rows = JSON.parse(String(value || '[]')); return Array.isArray(rows) ? rows : []; }
+  catch { return []; }
+}
 async function isTeacher(token) {
   const authResponse = await fetch(SUPABASE_URL + '/auth/v1/user', { headers: { apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: 'Bearer ' + token } });
   const user = await authResponse.json().catch(() => ({}));
@@ -50,7 +54,63 @@ module.exports = async function handler(req, res) {
     const auth = req.headers.authorization || '';
     const userToken = auth.startsWith('Bearer ') ? auth.slice(7) : '';
     if (!userToken || !(await isTeacher(userToken))) return send(res, 401, { error: 'Silakan masuk sebagai guru untuk melihat laporan.' });
-    if (req.method === 'DELETE') {      const body = req.body || {};      const deleteSubject = String(body.subject || '').trim();      const deleteTopic = String(body.topic || '').trim();      const deleteObjective = String(body.objective || '').trim();      if (!SUBJECTS.includes(deleteSubject)) return send(res, 400, { error: 'Mata pelajaran tidak valid.' });      if (!deleteTopic || deleteTopic.length > 200 || !deleteObjective || deleteObjective.length > 1000) return send(res, 400, { error: 'Topik dan tujuan pembelajaran wajib diisi.' });      const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;      const keyValue = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '';      const spreadsheetId = process.env.GOOGLE_SHEET_ID;      if (!email || !keyValue || !spreadsheetId) return send(res, 503, { error: 'Integrasi Google Sheets belum dikonfigurasi.' });      const googleToken = await getGoogleAccessToken(email, parseGooglePrivateKey(keyValue));      const base = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId);      const metaResponse = await fetch(base + '?fields=sheets.properties(sheetId,title)', { headers: { Authorization: 'Bearer ' + googleToken } });      if (!metaResponse.ok) throw new Error('Google Sheets metadata lookup failed: ' + metaResponse.status);      const meta = await metaResponse.json();      const sheet = (meta.sheets || []).map(item => item.properties).find(item => item && item.title === sheetTitleForSubject(deleteSubject));      if (!sheet) return send(res, 200, { ok: true, deleted: 0 });      const range = "'" + sheet.title.replace(/'/g, "''") + "'!A2:J";      const valuesResponse = await fetch(base + '/values/' + encodeURIComponent(range), { headers: { Authorization: 'Bearer ' + googleToken } });      if (!valuesResponse.ok) throw new Error('Google Sheets data lookup failed: ' + valuesResponse.status);      const values = await valuesResponse.json();      const resultRows = values.values || []; const topicIndices = resultRows.map((row, index) => String(row[4] || '').trim() === deleteTopic ? index : -1).filter(index => index >= 0); const exactIndices = topicIndices.filter(index => String(resultRows[index][5] || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID') === deleteObjective.replace(/\s+/g, ' ').trim().toLocaleLowerCase('id-ID')); const matchingIndices = exactIndices.length ? exactIndices : topicIndices;      if (!matchingIndices.length) return send(res, 200, { ok: true, deleted: 0 });      const requests = matchingIndices.reverse().map(index => ({ deleteDimension: { range: { sheetId: sheet.sheetId, dimension: 'ROWS', startIndex: index + 1, endIndex: index + 2 } } }));      const deleteResponse = await fetch(base + ':batchUpdate', { method: 'POST', headers: { Authorization: 'Bearer ' + googleToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ requests }) });      if (!deleteResponse.ok) throw new Error('Google Sheets deletion failed: ' + deleteResponse.status);      return send(res, 200, { ok: true, deleted: matchingIndices.length });    }    const subject = String(req.query.subject || 'Semua').trim();
+    if (req.method === 'DELETE') {
+      const body = req.body || {};
+      const deleteSubject = String(body.subject || '').trim();
+      const deleteTopic = String(body.topic || '').trim();
+      const deleteObjective = String(body.objective || '').trim();
+      const lessonId = String(body.lessonId || '').trim();
+      if (!SUBJECTS.includes(deleteSubject)) return send(res, 400, { error: 'Mata pelajaran tidak valid.' });
+      if (!deleteTopic || deleteTopic.length > 200 || !deleteObjective || deleteObjective.length > 1000 || !lessonId || lessonId.length > 200) return send(res, 400, { error: 'Identitas topik dan tujuan pembelajaran tidak valid.' });
+
+      const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+      const keyValue = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '';
+      const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+      if (!email || !keyValue || !spreadsheetId) return send(res, 503, { error: 'Integrasi Google Sheets belum dikonfigurasi.' });
+
+      const googleToken = await getGoogleAccessToken(email, parseGooglePrivateKey(keyValue));
+      const base = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId);
+      const metaResponse = await fetch(base + '?fields=sheets.properties(sheetId,title)', { headers: { Authorization: 'Bearer ' + googleToken } });
+      if (!metaResponse.ok) throw new Error('Google Sheets metadata lookup failed: ' + metaResponse.status);
+      const meta = await metaResponse.json();
+      const subjectSheetTitle = sheetTitleForSubject(deleteSubject);
+      const targetSheets = (meta.sheets || []).map(item => item.properties).filter(sheet => sheet && (sheet.title === subjectSheetTitle || sheet.title === 'Hasil Tes'));
+      const normalize = value => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
+      const requestsBySheet = [];
+      let matchingCount = 0;
+      let legacyTopicRows = 0;
+
+      for (const sheet of targetSheets) {
+        const quotedTitle = "'" + sheet.title.replace(/'/g, "''") + "'!";
+        const headerResponse = await fetch(base + '/values/' + encodeURIComponent(quotedTitle + 'A1:L1'), { headers: { Authorization: 'Bearer ' + googleToken } });
+        if (!headerResponse.ok) throw new Error('Google Sheets header lookup failed: ' + headerResponse.status);
+        const headers = (await headerResponse.json()).values?.[0] || [];
+        const hasLessonIdColumn = normalize(headers[11]) === normalize('ID Materi');
+        const range = quotedTitle + 'A2:L';
+        const valuesResponse = await fetch(base + '/values/' + encodeURIComponent(range), { headers: { Authorization: 'Bearer ' + googleToken } });
+        if (!valuesResponse.ok) throw new Error('Google Sheets data lookup failed: ' + valuesResponse.status);
+        const rows = (await valuesResponse.json()).values || [];
+        const matchingIndices = [];
+        rows.forEach((row, index) => {
+          if (normalize(row[3]) !== normalize(deleteSubject) || normalize(row[4]) !== normalize(deleteTopic)) return;
+          const rowLessonId = hasLessonIdColumn ? String(row[11] || '').trim() : ''; 
+          const matches = rowLessonId ? rowLessonId === lessonId : normalize(row[5]) === normalize(deleteObjective);
+          if (matches) matchingIndices.push(index);
+          else if (!rowLessonId) legacyTopicRows++;
+        });
+        if (matchingIndices.length) {
+          matchingCount += matchingIndices.length;
+          requestsBySheet.push(...matchingIndices.reverse().map(index => ({ deleteDimension: { range: { sheetId: sheet.sheetId, dimension: 'ROWS', startIndex: index + 1, endIndex: index + 2 } } })));
+        }
+      }
+
+      if (requestsBySheet.length) {
+        const deleteResponse = await fetch(base + ':batchUpdate', { method: 'POST', headers: { Authorization: 'Bearer ' + googleToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ requests: requestsBySheet }) });
+        if (!deleteResponse.ok) throw new Error('Google Sheets deletion failed: ' + deleteResponse.status);
+      }
+      return send(res, 200, { ok: true, deleted: matchingCount, legacyTopicRows });
+    }
+    const subject = String(req.query.subject || 'Semua').trim();
     const grade = String(req.query.grade || 'Semua').trim();
     const topic = String(req.query.topic || 'Semua').trim();
     if (subject !== 'Semua' && !SUBJECTS.includes(subject)) return send(res, 400, { error: 'Filter mata pelajaran tidak valid.' });
@@ -69,13 +129,13 @@ module.exports = async function handler(req, res) {
     if (subject !== 'Semua') titles = titles.filter(t => t === sheetTitleForSubject(subject));
     const rows = [];
     for (const title of titles) {
-      const range = "'" + title.replace(/'/g, "''") + "'!A2:J";
+      const range = "'" + title.replace(/'/g, "''") + "'!A2:K";
       const response = await fetch(base + '/values/' + encodeURIComponent(range), { headers: { Authorization: 'Bearer ' + googleToken } });
       if (!response.ok) { if (response.status === 404) continue; throw new Error('Google Sheets data lookup failed: ' + response.status); }
       const data = await response.json();
       for (const r of data.values || []) {
         if (r.length < 2 || (grade !== 'Semua' && String(r[2] || '').trim() !== grade) || (topic !== 'Semua' && String(r[4] || '').trim() !== topic)) continue;
-        rows.push({ waktu: r[0] || '', nama: r[1] || '', kelas: r[2] || '', mataPelajaran: r[3] || title, topik: r[4] || '', tujuan: r[5] || '', nilai: r[6] || '', kkm: r[7] || '', status: r[8] || '', jumlahSoal: r[9] || '' });
+        rows.push({ waktu: r[0] || '', nama: r[1] || '', kelas: r[2] || '', mataPelajaran: r[3] || title, topik: r[4] || '', tujuan: r[5] || '', nilai: r[6] || '', kkm: r[7] || '', status: r[8] || '', jumlahSoal: r[9] || '', analysis: parseAnalysis(r[10]) });
       }
     }
     rows.sort((a, b) => String(b.waktu).localeCompare(String(a.waktu)));

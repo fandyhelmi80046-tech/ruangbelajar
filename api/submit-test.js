@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 const SUPABASE_URL = 'https://jxrmihxzmqugrkdpmchx.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_cKdNxQjcnTTTdyZEHQutJQ_DUtCHkYb';
 const DEFAULT_ORIGIN = 'https://ruangbelajar-ten.vercel.app';
-const HEADERS = ['Waktu', 'Nama Lengkap', 'Kelas', 'Mata Pelajaran', 'Topik', 'Tujuan Pembelajaran', 'Nilai', 'KKM', 'Status', 'Jumlah Soal'];
+const HEADERS = ['Waktu', 'Nama Lengkap', 'Kelas', 'Mata Pelajaran', 'Topik', 'Tujuan Pembelajaran', 'Nilai', 'KKM', 'Status', 'Jumlah Soal', 'Analisis per Nomor', 'ID Materi'];
 
 function send(res, status, body) { res.status(status).json(body); }
 
@@ -80,11 +80,25 @@ async function ensureSubjectSheet(token, spreadsheetId, title) {
 
 async function ensureSubjectHeaders(token, spreadsheetId, title) {
   const quotedTitle = "'" + title.replace(/'/g, "''") + "'";
-  const base = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId) + '/values/' + encodeURIComponent(quotedTitle + '!A1:J1');
+  const base = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId) + '/values/' + encodeURIComponent(quotedTitle + '!A1:L1');
   const currentResponse = await fetch(base, { headers: { Authorization: 'Bearer ' + token } });
   if (!currentResponse.ok) throw new Error('Google Sheets header lookup failed');
   const current = await currentResponse.json();
-  if (current.values && current.values[0] && current.values[0].some(value => String(value).trim())) return;
+  const currentHeaders = current.values && current.values[0] || [];
+  if (currentHeaders.some(value => String(value).trim())) {
+    for (const column of [10, 11]) {
+      if (String(currentHeaders[column] || '').trim()) continue;
+      const columnName = String.fromCharCode(65 + column);
+      const headerUrl = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId) + '/values/' + encodeURIComponent(quotedTitle + '!' + columnName + '1') + '?valueInputOption=RAW';
+      const headerResponse = await fetch(headerUrl, {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ majorDimension: 'ROWS', values: [[HEADERS[column]]] })
+      });
+      if (!headerResponse.ok) throw new Error('Google Sheets header setup failed');
+    }
+    return;
+  }
   const headerResponse = await fetch(base + '?valueInputOption=RAW', {
     method: 'PUT',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
@@ -123,12 +137,14 @@ module.exports = async function handler(req, res) {
     const score = Number(body.score);
     const kkm = Number(body.kkm);
     const totalQuestions = Number(body.totalQuestions);
+    const analysis = Array.isArray(body.analysis) ? body.analysis : [];
     const passed = body.passed === true;
     const submittedAt = new Date(body.submittedAt || Date.now());
     if (fullName.length < 3 || fullName.length > 100 || /[\u0000-\u001f]/.test(fullName)) return send(res, 400, { error: 'Nama lengkap tidak valid.' });
     if (!/^(?:[7-9][A-E]|Kelas [789])$/.test(grade)) return send(res, 400, { error: 'Kelas tidak valid.' });
     if (!subject || subject.length > 100 || !topic || topic.length > 200 || objective.length > 1000) return send(res, 400, { error: 'Informasi ujian tidak valid.' });
     if (!Number.isInteger(score) || score < 0 || score > 100 || !Number.isInteger(kkm) || kkm < 0 || kkm > 100 || !Number.isInteger(totalQuestions) || totalQuestions < 1 || totalQuestions > 100) return send(res, 400, { error: 'Nilai ujian tidak valid.' });
+    if (analysis.length && (analysis.length !== totalQuestions || analysis.some((item, index) => !item || Number(item.number) !== index + 1 || typeof item.correct !== 'boolean' || typeof item.question !== 'string' || item.question.length > 250))) return send(res, 400, { error: 'Rincian jawaban ujian tidak valid.' });
     if (Number.isNaN(submittedAt.getTime())) return send(res, 400, { error: 'Waktu ujian tidak valid.' });
 
     const serviceEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -141,14 +157,14 @@ module.exports = async function handler(req, res) {
     const sheetName = sheetTitleForSubject(subject);
     await ensureSubjectSheet(token, spreadsheetId, sheetName);
     await ensureSubjectHeaders(token, spreadsheetId, sheetName);
-    const quotedRange = "'" + sheetName.replace(/'/g, "''") + "'!A:J";
+    const quotedRange = "'" + sheetName.replace(/'/g, "''") + "'!A:L";
     const appendUrl = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId) + '/values/' + encodeURIComponent(quotedRange) + ':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS';
     const appendResponse = await fetch(appendUrl, {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ majorDimension: 'ROWS', values: [[
         submittedAt.toISOString(), fullName, grade, subject, topic, objective,
-        score, kkm, passed ? 'Lulus' : 'Belum mencapai KKM', totalQuestions
+        score, kkm, passed ? 'Lulus' : 'Belum mencapai KKM', totalQuestions, JSON.stringify(analysis), String(body.lessonId || '')
       ]] })
     });
     if (!appendResponse.ok) {
